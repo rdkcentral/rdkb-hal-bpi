@@ -53,7 +53,7 @@
 #define RETRY_DELAY 2
 #define MAX_LINE 512
 #define RETURN_OK 0
-#define RETURN_ERR 1
+#define RETURN_ERR -1
 //#include "fwupgrade_hal.h"
 #define HTTP_DWNLD_CONFIG_FILE      "/tmp/httpDwnld.conf"
 #define HTTP_DWNLD_IF_FILE          "/tmp/httpDwnldIf.conf"
@@ -262,11 +262,17 @@ INT fwupgrade_hal_set_download_url (char* pUrl, char* pfilename)
 {
 	fprintf(stderr,"Entering %s \n",__FUNCTION__);
 //	if ((pUrl == NULL) || (pfilename==NULL))
-	if ((pUrl == NULL) || (pfilename==NULL) || (strlen(pfilename) >= FILENAME_MAX_LENGTH) || (strlen(pUrl) >= URL_MAX_LENGTH))
+	if ((pUrl == NULL) || (pfilename==NULL))
 	{
-		fprintf(stderr,"%s: Buffer length was exceeding for HTTP URL - %d or filename - %d... \n", __func__, strlen(pUrl), strlen(pfilename));
+		fprintf(stderr,"%s: NULL Url or filename has been passed as the input -... \n", __func__);
 		return RETURN_ERR;
 	}
+	else if ( (strlen(pfilename) >= FILENAME_MAX_LENGTH) || (strlen(pUrl) >= URL_MAX_LENGTH) )
+	{
+                fprintf(stderr,"%s: Buffer length was exceeding for HTTP URL - %d or filename - %d... \n", __func__, strlen(pUrl), strlen(pfilename));
+		return RETURN_ERR;
+             
+        }
 	else
 	{
 		FILE* fp;
@@ -318,11 +324,17 @@ Parameters : char* pfilename;
 INT fwupgrade_hal_get_download_url (char *pUrl, char* pfilename)
 {
 //if ((pUrl == NULL) || (pfilename==NULL))
-	if ((pUrl == NULL) || (pfilename==NULL) || (strlen(pfilename) >= FILENAME_MAX_LENGTH) || (strlen(pUrl) >= URL_MAX_LENGTH))
+	if ((pUrl == NULL) || (pfilename==NULL))
 	{
-		fprintf(stderr,"%s: Buffer length was exceeding for HTTP URL - %d or filename - %d... \n", __func__, strlen(pUrl), strlen(pfilename));
-		return RETURN_ERR;
-	}
+                fprintf(stderr,"%s: NULL Url or filename has been passed as the input -... \n", __func__);
+                return RETURN_ERR;
+        }
+        else if ( (strlen(pfilename) >= FILENAME_MAX_LENGTH) || (strlen(pUrl) >= URL_MAX_LENGTH) )
+        {
+                fprintf(stderr,"%s: Buffer length was exceeding for HTTP URL - %d or filename - %d... \n", __func__, strlen(pUrl), strlen(pfilename));
+                return RETURN_ERR;
+
+        }		
 	else
 	{
 		FILE* fp;
