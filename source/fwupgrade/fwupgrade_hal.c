@@ -600,6 +600,7 @@ INT fwupgrade_hal_download_reboot_now()
         int bs_512 = 512;
         int bs_1M = 1024 * 1024;
         char decompress_cmd[300];
+	char out_cmd[512];
         fprintf(stderr, "Entering %s\n", __func__);
         snprintf(wic_path, sizeof(wic_path), "/mnt/bootpart/%s", g_downloaded_file_name);
         // Step 1: Check if file exists
@@ -611,7 +612,7 @@ INT fwupgrade_hal_download_reboot_now()
 
         // Step 2: Decompress
         snprintf(decompress_cmd, sizeof(decompress_cmd), "bzip2 -d %s", wic_path);
-        int ret = system(decompress_cmd);
+	int ret = run_command(decompress_cmd, out_cmd, sizeof(out));
         if (ret != 0) {
                 fprintf(stderr,"Decompression failed for: %s\n", wic_path);
                 return RETURN_ERR;
