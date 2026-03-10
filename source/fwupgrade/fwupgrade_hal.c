@@ -73,7 +73,7 @@ int g_xconf_flag = 0;
 #define REBOOT_REASON_SW_UPGRADE    "Software_upgrade"
 #define MAX_BLOCK_SIZE 4096
 char g_root_partition[PATH_LEN] = {0};
-char g_downloaded_file_name[128] = {0};	
+char g_downloaded_file_name[128] = {0};
 char extractedVersion[256] = {0};
 char passiveVersion[256] = {0};
 int protocol = 0;
@@ -107,7 +107,10 @@ int run_command(const char *cmd, char *output, unsigned int size) {
 
         while (fgets(buf, sizeof(buf), fp)) {
                 fprintf(stderr, "[CMD OUTPUT] %s", buf);
-                n+=strncpy(output+n, buf, strlen(buf));
+                if (output && size > 0) {
+                       strncpy(output + n, buf, strlen(buf));
+                       n += strlen(buf);
+                }
         }
 
         if((status = pclose(fp))==-1) {
@@ -123,33 +126,33 @@ int run_command(const char *cmd, char *output, unsigned int size) {
 /* * fwupgrade_hal_util_get_syscmd_output() */
 static INT fwupgrade_hal_util_get_syscmd_output( char *pCmd, char *pOutput, int iOutputSize )
 {
-	FILE   *FilePtr            = NULL;
-	char   bufContent[ 256 ]  = { 0 };
+        FILE   *FilePtr            = NULL;
+        char   bufContent[ 256 ]  = { 0 };
 
-	if ( ( NULL == pCmd ) || ( NULL == pOutput ) || ( 0 == iOutputSize ) )
-	{
-		return RETURN_ERR;
-	}
+        if ( ( NULL == pCmd ) || ( NULL == pOutput ) || ( 0 == iOutputSize ) )
+        {
+                return RETURN_ERR;
+        }
 
-	FilePtr = popen( pCmd, "r" );
+        FilePtr = popen( pCmd, "r" );
 
-	if ( FilePtr )
-	if ( FilePtr )
-	{
-		char *pos;
+        if ( FilePtr )
+        if ( FilePtr )
+        {
+                char *pos;
 
-		fgets( bufContent, 256, FilePtr );
-		fclose( FilePtr );
-		FilePtr = NULL;
+                fgets( bufContent, 256, FilePtr );
+                fclose( FilePtr );
+                FilePtr = NULL;
 
-		// Remove line \n charecter from string
-		if ( ( pos = strchr( bufContent, '\n' ) ) != NULL )
-			*pos = '\0';
+                // Remove line \n charecter from string
+                if ( ( pos = strchr( bufContent, '\n' ) ) != NULL )
+                        *pos = '\0';
 
-		snprintf( pOutput, iOutputSize, "%s", bufContent );
-	}
+                snprintf( pOutput, iOutputSize, "%s", bufContent );
+        }
 
-	return RETURN_ERR;
+        return RETURN_ERR;
 }
 
 
@@ -158,8 +161,8 @@ static INT fwupgrade_hal_util_get_syscmd_output( char *pCmd, char *pOutput, int 
  */
 static INT download_image_from_server(char *httpUrl, char* fileName)
 {
-	// TBD should have been dynamically allocated
-	//
+        // TBD should have been dynamically allocated
+        //
         char cmd[1400] = {0};
         char res[16] = {0};
         FILE* fp = NULL;
@@ -167,28 +170,31 @@ static INT download_image_from_server(char *httpUrl, char* fileName)
         char output[512] = {0};
         static int partition_created = 0;
 
-	const char *partition_path = STAGING_PARTITION;
+        const char *partition_path = STAGING_PARTITION;
         struct stat st;
 
         // Check if partition exists
         if (access(partition_path, F_OK) == 0) {
                 fprintf(stderr,"Partition %s already exists. Skipping creation.\n", partition_path);
         } else {
-		ret = run_command("echo -e \"n\n\n\n+3G\nw\" | fdisk /dev/mmcblk0", NULL, 0);
-        	if (ret != 0) {
-                	fprintf(stderr, "Failed to create new partition\n");
-                	return -1;
-        	}
-	
+                ret = run_command("echo -e \"n\n\n\n+3G\nw\" | fdisk /dev/mmcblk0", NULL, 0);
+                if (ret != 0) {
+                        fprintf(stderr, "Failed to create new partition\n");
+                        return -1;
+                }
         snprintf(cmd, sizeof(cmd), "sgdisk -c 14:\"staging\" /dev/mmcblk0");
         run_command(cmd, NULL, 0);
         snprintf(cmd, sizeof(cmd), "mkfs.ext4 -F -L staging %s", partition_path);
-        run_command(cmd, NULL, 0);
-	}
+        ret = run_command(cmd, NULL, 0);
+        if (ret != 0) {
+                fprintf(stderr, "mkfs failed for %s\n", partition_path);
+                return RETURN_ERR;
+        }
+        }
         // Step 6: Mount it to /mnt/bootpart
-	if (access(MOUNT_POINT_1, F_OK) != 0) {
-		if (mkdir(MOUNT_POINT_1, 0755) != 0) {
-                	perror("mkdir failed");
+        if (access(MOUNT_POINT_1, F_OK) != 0) {
+                if (mkdir(MOUNT_POINT_1, 0755) != 0) {
+                        perror("mkdir failed");
                         return EXIT_FAILURE;
                }
         }
@@ -196,54 +202,55 @@ static INT download_image_from_server(char *httpUrl, char* fileName)
         memset(output, 0, sizeof(output));
         ret = run_command(cmd, output, sizeof(output));
 
-	if (ret != 0) {
-        fprintf(stderr, "Mount failed: %s\n", output);
-	}
-	strncpy(g_downloaded_file_name, fileName, sizeof(g_downloaded_file_name) - 1);
+        if (ret != 0) {
+                fprintf(stderr, "Mount failed: %s\n", output);
+                return RETURN_ERR;
+        }
+        strncpy(g_downloaded_file_name, fileName, sizeof(g_downloaded_file_name) - 1);
         g_downloaded_file_name[sizeof(g_downloaded_file_name) - 1] = '\0';
 
-	if (g_protocol == PROTOCOL_HTTP || g_protocol == PROTOCOL_HTTPS) {
-    		fprintf(stderr, "%s: Using CURL: curl -fgLo /mnt/bootpart/%s %s\n", __func__, fileName, httpUrl);
-    		snprintf(cmd, sizeof(cmd),
+        if (g_protocol == PROTOCOL_HTTP || g_protocol == PROTOCOL_HTTPS) {
+                fprintf(stderr, "%s: Using CURL: curl -fgLo /mnt/bootpart/%s %s\n", __func__, fileName, httpUrl);
+                snprintf(cmd, sizeof(cmd),
                 "rm -f dload_status && "
                 "(curl -fgLo /mnt/bootpart/%s %s); "
                 "echo $? > /mnt/bootpart/dload_status",
                 fileName, httpUrl);
-	}
- 	else if (g_protocol == PROTOCOL_TFTP) {
-    		fprintf(stderr, "%s: Using TFTP: tftp -g -r %s %s\n", __func__, fileName, g_server_ip);
-    		snprintf(cmd, sizeof(cmd),
+        }
+        else if (g_protocol == PROTOCOL_TFTP) {
+                fprintf(stderr, "%s: Using TFTP: tftp -g -r %s %s\n", __func__, fileName, g_server_ip);
+                snprintf(cmd, sizeof(cmd),
                 "cd /mnt/bootpart && "
                 "rm -f dload_status && "
                 "(/usr/bin/tftp -g -r %s %s); "
                 "echo $? > dload_status",
                 fileName, g_server_ip);
-	}
-	else
-	{
-		fprintf(stderr, "%s: Unknown protocol in URL: %s\n", __func__, httpUrl);
-    		return RETURN_ERR;
-	}
+        }
+        else
+        {
+                fprintf(stderr, "%s: Unknown protocol in URL: %s\n", __func__, httpUrl);
+                return RETURN_ERR;
+        }
         run_command(cmd, NULL, 0);
 
-	fprintf(stderr," the value of flag in /tmp is ",g_xconf_flag);
-	g_xconf_flag = get_xconf_flag();
-	if (g_xconf_flag == 1) {
+        fprintf(stderr," the value of flag in /tmp is ",g_xconf_flag);
+        g_xconf_flag = get_xconf_flag();
+        if (g_xconf_flag == 1) {
 
-	fprintf(stderr," the value of flag in /tmp is ",g_xconf_flag);
+        fprintf(stderr," the value of flag in /tmp is ",g_xconf_flag);
         char md5_file[256] = "/tmp/local_md5.txt";
         snprintf(cmd, sizeof(cmd),
                 "cd /mnt/bootpart &&"
-		"md5sum %s > %s",
+                "md5sum %s > %s",
                 fileName, md5_file);
         memset(output, 0, sizeof(output));
         ret= run_command(cmd, output, sizeof(output));
         if (ret !=0){
-	        fprintf(stderr,"md5sum failed for downloaded image");
+                fprintf(stderr,"md5sum failed for downloaded image");
         }
 
         snprintf(cmd, sizeof(cmd),
-		"(diff -q %s /tmp/%s.txt > /dev/null; ret=$?; echo $ret > /mnt/bootpart/dload_status; exit $ret)", md5_file, fileName);
+                "(diff -q %s /tmp/%s.txt > /dev/null; ret=$?; echo $ret > /mnt/bootpart/dload_status; exit $ret)", md5_file, fileName);
         memset(output, 0, sizeof(output));
         ret = run_command(cmd, output, sizeof(output));
 
@@ -251,10 +258,10 @@ static INT download_image_from_server(char *httpUrl, char* fileName)
                 fprintf(stderr, "MD5 mismatch! See %s vs /tmp/%s\n", md5_file, g_firmwareVersion);
                 return -1; 
         }
-	}
+        }
         fprintf(stderr, "MD5 verified successfully.\n");
         fprintf(stderr, "Download successful. File: %s and %d\n", g_downloaded_file_name, g_xconf_flag);
-	fp = fopen("/mnt/bootpart/dload_status", "r");
+        fp = fopen("/mnt/bootpart/dload_status", "r");
         if (NULL == fp) {
                 printf("dload_status : file open error!");
                 return RETURN_ERR;
@@ -266,7 +273,7 @@ static INT download_image_from_server(char *httpUrl, char* fileName)
                 printf("Download from remote server failed!\n");
                 return RETURN_ERR;
         }
-	return 0;
+        return 0;
 }
 
 int get_xconf_flag() {
@@ -292,50 +299,50 @@ Parameters : char* pfilename;
 */
 INT fwupgrade_hal_set_download_url (char* pUrl, char* pfilename)
 {
-	fprintf(stderr,"Entering %s \n",__FUNCTION__);
-//	if ((pUrl == NULL) || (pfilename==NULL))
-	if ((pUrl == NULL) || (pfilename==NULL) || (strlen(pfilename) >= FILENAME_MAX_LENGTH) || (strlen(pUrl) >= URL_MAX_LENGTH))
-	{
-		fprintf(stderr,"%s: Buffer length was exceeding for HTTP URL - %d or filename - %d... \n", __func__, strlen(pUrl), strlen(pfilename));
-		return RETURN_ERR;
-	}
-	else
-	{
-		FILE* fp;
-		char httpUrl[1024] = {0};
-		char fileName[256] = {0};
-		int ret_status = 0;
+        fprintf(stderr,"Entering %s \n",__FUNCTION__);
+//      if ((pUrl == NULL) || (pfilename==NULL))
+        if ((pUrl == NULL) || (pfilename==NULL) || (strlen(pfilename) >= FILENAME_MAX_LENGTH) || (strlen(pUrl) >= URL_MAX_LENGTH))
+        {
+                fprintf(stderr,"%s: Buffer length was exceeding for HTTP URL - %d or filename - %d... \n", __func__, strlen(pUrl), strlen(pfilename));
+                return RETURN_ERR;
+        }
+        else
+        {
+                FILE* fp;
+                char httpUrl[1024] = {0};
+                char fileName[256] = {0};
+                int ret_status = 0;
 
-		/* To Get the previous URL if any and compare with new one */
-		ret_status = fwupgrade_hal_get_download_url(httpUrl, fileName);
+                /* To Get the previous URL if any and compare with new one */
+                ret_status = fwupgrade_hal_get_download_url(httpUrl, fileName);
 
-		if(ret_status == RETURN_OK)
-		{
-			if ((strcmp(httpUrl, pUrl) == 0) && (strcmp(fileName, pfilename) == 0))
-			{
-				fprintf(stderr,"HTTP URL and file name is same as previous! \n");
-			}
-			else
-			{
-				fprintf(stderr,"HTTP URL or filename Changed! \n");
-				run_commnd("rm /mnt/bootpart/dload_status", NULL, 0);
-			}
-		}
-		else
-		{
-			run_command("rm /mnt/bootpart/dload_status", NULL, 0);
-		}
-		fp = fopen(HTTP_DWNLD_CONFIG_FILE, "w");
-		if(fp == NULL)
-		{
-			return RETURN_ERR;
-		}
-		fprintf(fp, "%s\n%s\n", pUrl, pfilename);
-		fclose(fp);
-		fprintf(stderr,"%s Stored HTTP download URL and filename to %s file\n", __func__, HTTP_DWNLD_CONFIG_FILE);
+                if(ret_status == RETURN_OK)
+                {
+                        if ((strcmp(httpUrl, pUrl) == 0) && (strcmp(fileName, pfilename) == 0))
+                        {
+                                fprintf(stderr,"HTTP URL and file name is same as previous! \n");
+                        }
+                        else
+                        {
+                                fprintf(stderr,"HTTP URL or filename Changed! \n");
+                                run_commnd("rm /mnt/bootpart/dload_status", NULL, 0);
+                        }
+                }
+                else
+                {
+                        run_command("rm /mnt/bootpart/dload_status", NULL, 0);
+                }
+                fp = fopen(HTTP_DWNLD_CONFIG_FILE, "w");
+                if(fp == NULL)
+                {
+                        return RETURN_ERR;
+                }
+                fprintf(fp, "%s\n%s\n", pUrl, pfilename);
+                fclose(fp);
+                fprintf(stderr,"%s Stored HTTP download URL and filename to %s file\n", __func__, HTTP_DWNLD_CONFIG_FILE);
 
-		return RETURN_OK;
-	}
+                return RETURN_OK;
+        }
 }
 
 
@@ -350,87 +357,87 @@ Parameters : char* pfilename;
 INT fwupgrade_hal_get_download_url (char *pUrl, char* pfilename)
 {
 //if ((pUrl == NULL) || (pfilename==NULL))
-	if ((pUrl == NULL) || (pfilename==NULL) || (strlen(pfilename) >= FILENAME_MAX_LENGTH) || (strlen(pUrl) >= URL_MAX_LENGTH))
-	{
-		fprintf(stderr,"%s: Buffer length was exceeding for HTTP URL - %d or filename - %d... \n", __func__, strlen(pUrl), strlen(pfilename));
-		return RETURN_ERR;
-	}
-	else
-	{
-		FILE* fp;
-		char* fc;
+        if ((pUrl == NULL) || (pfilename==NULL) || (strlen(pfilename) >= FILENAME_MAX_LENGTH) || (strlen(pUrl) >= URL_MAX_LENGTH))
+        {
+                fprintf(stderr,"%s: Buffer length was exceeding for HTTP URL - %d or filename - %d... \n", __func__, strlen(pUrl), strlen(pfilename));
+                return RETURN_ERR;
+        }
+        else
+        {
+                FILE* fp;
+                char* fc;
 
-		fprintf(stderr,"%s: Checking Buffer length for HTTP URL - %d or filename - %d... \n", __func__, strlen(pUrl), strlen(pfilename));
-		fprintf(stderr,"Entering %s\n", __func__);
+                fprintf(stderr,"%s: Checking Buffer length for HTTP URL - %d or filename - %d... \n", __func__, strlen(pUrl), strlen(pfilename));
+                fprintf(stderr,"Entering %s\n", __func__);
 
-		fp = fopen(HTTP_DWNLD_CONFIG_FILE, "r");
-		if(fp == NULL)
-		{
-			return RETURN_ERR;
-		}
-		fc = pUrl;
-		while((*fc = (char)fgetc(fp)) != '\n')
-		{
-			++fc;
-		}
-		*fc = '\0';
-		fc = pfilename;
-		while((*fc = (char)fgetc(fp)) != '\n')
-		{
-			++fc;
-		}
-		*fc = '\0';
-		fprintf(stderr,"%s pfilename: %s\n", __func__, pfilename);
-		fclose(fp);
+                fp = fopen(HTTP_DWNLD_CONFIG_FILE, "r");
+                if(fp == NULL)
+                {
+                        return RETURN_ERR;
+                }
+                fc = pUrl;
+                while((*fc = (char)fgetc(fp)) != '\n')
+                {
+                        ++fc;
+                }
+                *fc = '\0';
+                fc = pfilename;
+                while((*fc = (char)fgetc(fp)) != '\n')
+                {
+                        ++fc;
+                }
+                *fc = '\0';
+                fprintf(stderr,"%s pfilename: %s\n", __func__, pfilename);
+                fclose(fp);
 
-		return RETURN_OK;
-	}
+                return RETURN_OK;
+        }
 }
 
 /* interface=0 for wan0, interface=1 for erouter0 */
 INT fwupgrade_hal_set_download_interface(unsigned int interface)
 {
-	fprintf(stderr,"Entering %s\n", __func__);
-	FILE *fp = NULL;	
-	if( interface > 1 )
-	{
-		return RETURN_ERR;
-	}
-	// Save the interface numerical value to the config file
-	fp = fopen(HTTP_DWNLD_IF_FILE, "w");
-	if(fp == NULL)
-	{
-		return RETURN_ERR;
-	}
-	fprintf(fp, "%d\n", interface);
-	fclose(fp);
-	return RETURN_OK;
+        fprintf(stderr,"Entering %s\n", __func__);
+        FILE *fp = NULL;
+        if( interface > 1 )
+        {
+                return RETURN_ERR;
+        }
+        // Save the interface numerical value to the config file
+        fp = fopen(HTTP_DWNLD_IF_FILE, "w");
+        if(fp == NULL)
+        {
+                return RETURN_ERR;
+        }
+        fprintf(fp, "%d\n", interface);
+        fclose(fp);
+        return RETURN_OK;
 }
 
 
 /* interface=0 for wan0, interface=1 for erouter0 */
 INT fwupgrade_hal_get_download_interface(unsigned int* pinterface)
 {
-	if (pinterface == NULL)
-	{
-		return RETURN_ERR;
-	}
-	else
-	{
-		FILE *fp = NULL;
-		char ifNum;
+        if (pinterface == NULL)
+        {
+                return RETURN_ERR;
+        }
+        else
+        {
+                FILE *fp = NULL;
+                char ifNum;
 
-		fp = fopen(HTTP_DWNLD_IF_FILE, "r");
-		if(fp == NULL)
-		{
-			return RETURN_ERR;
-		}
-		ifNum = fgetc(fp);
-		*pinterface = atoi(&ifNum);
-		fprintf(stderr,"%s Download interface numerical value: %d\n", __func__, *pinterface);
-		fclose(fp);
-		return RETURN_OK;
-	}
+                fp = fopen(HTTP_DWNLD_IF_FILE, "r");
+                if(fp == NULL)
+                {
+                        return RETURN_ERR;
+                }
+                ifNum = fgetc(fp);
+                *pinterface = atoi(&ifNum);
+                fprintf(stderr,"%s Download interface numerical value: %d\n", __func__, *pinterface);
+                fclose(fp);
+                return RETURN_OK;
+        }
 }
 
 
@@ -469,13 +476,13 @@ INT fwupgrade_hal_download ()
 
     if((pstr = strstr(dlHttpUrl, "http://")))
     {
-	g_protocol = PROTOCOL_HTTP;
+        g_protocol = PROTOCOL_HTTP;
         pstr += strlen("http://");
         strcpy(fullhostname, "http://");
     }
     else if((pstr = strstr(dlHttpUrl, "https://")))
     {
-	g_protocol = PROTOCOL_HTTPS;
+        g_protocol = PROTOCOL_HTTPS;
         pstr += strlen("https://");
         strcpy(fullhostname, "https://");
     }
@@ -486,7 +493,7 @@ INT fwupgrade_hal_download ()
     }
     else if((pstr = strstr(dlHttpUrl, "tftp://")))
     {
-	    g_protocol = PROTOCOL_TFTP;
+            g_protocol = PROTOCOL_TFTP;
         pstr += strlen("tftp://");
         strcpy(fullhostname, "tftp://");
     }
@@ -568,28 +575,28 @@ Parameters : <None>
 ?   */
 INT fwupgrade_hal_get_download_status()
 {
-	fprintf(stderr,"Entering %s\n", __func__);
-	FILE* DL_StatusFile = NULL;
-	char str[16] = {0};
-	int dl_stat = 0;
-	DL_StatusFile = fopen("/mnt/bootpart/dload_status", "r");
-	if(NULL != DL_StatusFile)
-	{
-		fgets(str, sizeof(str)-1, DL_StatusFile);
-		fclose(DL_StatusFile);
-		dl_stat = atoi(str);
-		if(0 != dl_stat)
-		{
-			fprintf(stderr,"download from remote server failed!\n");
-			return 500;
-		}
-		return 200;
-	}
-	if ( gDwdInProgressFlag == 1 )
-	{
-		return 100;
-	}
-	return 0;
+        fprintf(stderr,"Entering %s\n", __func__);
+        FILE* DL_StatusFile = NULL;
+        char str[16] = {0};
+        int dl_stat = 0;
+        DL_StatusFile = fopen("/mnt/bootpart/dload_status", "r");
+        if(NULL != DL_StatusFile)
+        {
+                fgets(str, sizeof(str)-1, DL_StatusFile);
+                fclose(DL_StatusFile);
+                dl_stat = atoi(str);
+                if(0 != dl_stat)
+                {
+                        fprintf(stderr,"download from remote server failed!\n");
+                        return 500;
+                }
+                return 200;
+        }
+        if ( gDwdInProgressFlag == 1 )
+        {
+                return 100;
+        }
+        return 0;
 }
 
 /* fwupgrade_hal_reboot_ready */
@@ -624,9 +631,9 @@ Parameters : <None>
 */
 INT fwupgrade_hal_download_reboot_now()
 {
-	fprintf(stderr,"Entering %s\n", __func__);
+        fprintf(stderr,"Entering %s\n", __func__);
 
-	char wic_path[256];
+        char wic_path[256];
         char target_boot[PATH_LEN], target_root[PATH_LEN];
         int update_fstab = 0;
         int bs_512 = 512;
@@ -654,14 +661,14 @@ INT fwupgrade_hal_download_reboot_now()
                 fprintf(stderr,"Decompression failed for: %s\n", wic_path);
                 return RETURN_ERR;
         }
-	// Step 3: Get decompressed path
+        // Step 3: Get decompressed path
         char decompressed_path[256];
         strncpy(decompressed_path, wic_path, sizeof(decompressed_path));
         decompressed_path[strlen(decompressed_path) - 4] = '\0';  // Strip ".bz2"
 
         // Proceed with flashing decompressed_path
         fprintf(stderr,"Decompressed image at: %s\n", decompressed_path);
-	if (detect_root_partition() != RETURN_OK) {
+        if (detect_root_partition() != RETURN_OK) {
         fprintf(stderr, "Could not detect root partition!\n");
         return RETURN_ERR;
         }
@@ -669,8 +676,8 @@ INT fwupgrade_hal_download_reboot_now()
 
         // Step 3: Determine target partitions
 
-	if (strcmp(g_root_partition, "/dev/mmcblk0p4") == 0) {
-		fprintf(stderr, "Currently booted from ROOT-A, switching to ROOT-B\n");
+        if (strcmp(g_root_partition, "/dev/mmcblk0p4") == 0) {
+                fprintf(stderr, "Currently booted from ROOT-A, switching to ROOT-B\n");
                 strcpy(target_boot, "/dev/mmcblk0p7");
                 strcpy(target_root, "/dev/mmcblk0p8");
                 update_fstab = 1;
@@ -684,86 +691,86 @@ INT fwupgrade_hal_download_reboot_now()
                 return RETURN_ERR;
         }
 
-	copy_blocks(decompressed_path, target_boot, 17408, 32768, bs_512);
-	copy_blocks(decompressed_path, target_root, 50176, 2097152, bs_512);
-	//copy_blocks(decompressed_path, target_root, 50176, 786432, bs_512);
-	sync();
-	fprintf(stderr, "boot and root are ready\n");
+        copy_blocks(decompressed_path, target_boot, 17408, 32768, bs_512);
+        copy_blocks(decompressed_path, target_root, 50176, 2097152, bs_512);
+        //copy_blocks(decompressed_path, target_root, 50176, 786432, bs_512);
+        sync();
+        fprintf(stderr, "boot and root are ready\n");
         if (update_fstab) {
-		if (access(MOUNT_POINT, F_OK) != 0) {
-    			if (mkdir(MOUNT_POINT, 0755) != 0) {
-        			perror("mkdir failed");
-        			return EXIT_FAILURE;
-    			}
-		}
+                if (access(MOUNT_POINT, F_OK) != 0) {
+                        if (mkdir(MOUNT_POINT, 0755) != 0) {
+                                perror("mkdir failed");
+                                return EXIT_FAILURE;
+                        }
+                }
 
-		snprintf(fstab_path, sizeof(fstab_path), "%s/etc/fstab", MOUNT_POINT);
+                snprintf(fstab_path, sizeof(fstab_path), "%s/etc/fstab", MOUNT_POINT);
 
-        	while (attempt < MAX_RETRIES) {
-                	snprintf(cmd, sizeof(cmd),
-                        	"mount -t ext4 -o relatime,sync %s %s 2>&1",
-                        	target_root, MOUNT_POINT);
-			memset(output, 0, sizeof(output));
-                	ret = run_command(cmd, output, sizeof(output));
+                while (attempt < MAX_RETRIES) {
+                        snprintf(cmd, sizeof(cmd),
+                                "mount -t ext4 -o relatime,sync %s %s 2>&1",
+                                target_root, MOUNT_POINT);
+                        memset(output, 0, sizeof(output));
+                        ret = run_command(cmd, output, sizeof(output));
 
-                	if (ret == 0) {
-                        	if (access(fstab_path, F_OK) == 0) {
-                                	fprintf(stderr,
-                                        	"Mount successful and fstab found at %s\n",
-                                        	fstab_path);
-                                	break;
-				} else {
-					fprintf(stderr,"target fstab not found. Retrying...\n");
-				}
+                        if (ret == 0) {
+                                if (access(fstab_path, F_OK) == 0) {
+                                        fprintf(stderr,
+                                                "Mount successful and fstab found at %s\n",
+                                                fstab_path);
+                                        break;
+                                } else {
+                                        fprintf(stderr,"target fstab not found. Retrying...\n");
+                                }
                         } else {
-				fprintf(stderr, "Mount failed with exit code %d (attempt %d/%d)\n",
-                        	ret, attempt + 1, MAX_RETRIES);
-			}
+        fprintf(stderr, "Mount failed with exit code %d (attempt %d/%d)\n",
+                                ret, attempt + 1, MAX_RETRIES);
+                        }
 
-                	attempt++;
-                	sleep(RETRY_DELAY);
-        	}
+                        attempt++;
+                        sleep(RETRY_DELAY);
+                }
 
-        	fp_in = fopen(fstab_path, "r");
-        	if (!fp_in) {
-                	perror("Failed to open fstab for reading");
-                	return -1;
-        	}
+                fp_in = fopen(fstab_path, "r");
+                if (!fp_in) {
+                        perror("Failed to open fstab for reading");
+                        return -1;
+                }
 
-        	fp_out = fopen("/opt/root_new/etc/fstab.tmp", "w");
-        	if (!fp_out) {
-                	perror("Failed to open temp file for writing");
-                	fclose(fp_in);
-                	return -1;
-        	}
+                fp_out = fopen("/opt/root_new/etc/fstab.tmp", "w");
+                if (!fp_out) {
+                        perror("Failed to open temp file for writing");
+                        fclose(fp_in);
+                        return -1;
+                }
 
-        	while (fgets(line, sizeof(line), fp_in)) {
-                	if ((pos = strstr(line, OLD_STR))) {
-                        	*(pos + 13) = '7';
-                	}
-                	fputs(line, fp_out);
-        	}
+                while (fgets(line, sizeof(line), fp_in)) {
+                        if ((pos = strstr(line, OLD_STR))) {
+                                *(pos + 13) = '7';
+                        }
+                        fputs(line, fp_out);
+                }
 
-        	fclose(fp_in);
-        	fclose(fp_out);
+                fclose(fp_in);
+                fclose(fp_out);
 
-        	if (rename("/opt/root_new/etc/fstab.tmp", fstab_path) != 0) {
-                	perror("Failed to overwrite fstab");
-                	return -1;
-        	}
+                if (rename("/opt/root_new/etc/fstab.tmp", fstab_path) != 0) {
+                        perror("Failed to overwrite fstab");
+                        return -1;
+                }
 
-        	fprintf(stderr,"fstab updated successfully.\n");
+                fprintf(stderr,"fstab updated successfully.\n");
                 umount("/opt/root_new");
                 rmdir("/opt/root_new");
-        	} else {
-                	fprintf(stderr, "No fstab update required for mmcblk0p4 boot.\n");
-        	}
+                } else {
+                        fprintf(stderr, "No fstab update required for mmcblk0p4 boot.\n");
+                }
 
         copy_blocks("/dev/mmcblk0p1", "/mnt/bootpart/bl2.img", 0, 8158, bs_512);
         copy_blocks("/dev/mmcblk0p5", "/mnt/bootpart/bl2_b.img", 0, 8158, bs_512);
         copy_blocks("/dev/mmcblk0p2", "/mnt/bootpart/fip.img", 0, 4096, bs_512);
         copy_blocks("/dev/mmcblk0p6", "/mnt/bootpart/fip_b.img", 0, 4096, bs_512);
-	sync();
+        sync();
         fprintf(stderr, "bl2 and fip 2 are ready\n");
         fprintf(stderr, "target boot and root are written\n");
 
@@ -771,16 +778,16 @@ INT fwupgrade_hal_download_reboot_now()
         write_image_to_device("/mnt/bootpart/bl2.img", "/dev/mmcblk0p5", bs_512);
         write_image_to_device("/mnt/bootpart/fip_b.img", "/dev/mmcblk0p2", bs_512);
         write_image_to_device("/mnt/bootpart/fip.img", "/dev/mmcblk0p6", bs_512);
-	sync();
-	fprintf(stderr,"value of the xconf flag is %d\n", g_xconf_flag);
-	cleanup_mount(MOUNT_POINT_1);
-	umount(MOUNT_POINT_1);
-	sync();
-	sleep(3);
-	fprintf(stderr,"All done. Rebooting...\n");
+        sync();
+        fprintf(stderr,"value of the xconf flag is %d\n", g_xconf_flag);
+        cleanup_mount(MOUNT_POINT_1);
+        umount(MOUNT_POINT_1);
+        sync();
+        sleep(3);
+        fprintf(stderr,"All done. Rebooting...\n");
         run_command("/sbin/reboot", NULL, 0);
 
-    	return RETURN_OK;
+        return RETURN_OK;
 }
 
 INT fwupgrade_hal_get_data_from_Xconf() {
@@ -814,7 +821,7 @@ INT fwupgrade_hal_get_data_from_Xconf() {
     ret = run_command(cmd, output, sizeof(output));
     if (ret != 0) {
         fprintf(stderr, "Curl command failed: %s\n", output);
-	return -1;
+        return -1;
     }
 
     // Step 3: Parse response JSON
@@ -868,23 +875,23 @@ INT fwupgrade_hal_get_data_from_Xconf() {
         return -1;
     }
     if (strcasecmp (g_firmwareProtocol, "http") == 0){
-	    port_num = 80;
-	    protocol = 1;
+            port_num = 80;
+            protocol = 1;
     }
     else if (strcasecmp (g_firmwareProtocol, "tftp") == 0) {
-	    port_num = 69;
-	    protocol = 2;
+            port_num = 69;
+            protocol = 2;
     }
     else {
-	    fprintf(stderr," invalid protocal... please check");
-	    return -1;
+            fprintf(stderr," invalid protocal... please check");
+            return -1;
     }
     if (detect_root_partition() != RETURN_OK) {
-	fprintf(stderr, "Could not detect root partition!\n");
-	return;
-	}
+        fprintf(stderr, "Could not detect root partition!\n");
+        return;
+        }
     if (check_image_version(g_firmwareVersion, g_firmwareLocation, g_root_partition) != RETURN_OK){
-	    fprintf(stderr, "Firmware download failed, aborting upgrade.\n");
+            fprintf(stderr, "Firmware download failed, aborting upgrade.\n");
             return RETURN_ERR;
     }
     set_xconf_flag();
@@ -918,133 +925,133 @@ int get_cloud_url(char *url, int url_len)
 
 int detect_root_partition(void)
 {
-	FILE *fp;
-	char cmd[CMD_BUF] = {0};
+        FILE *fp;
+        char cmd[CMD_BUF] = {0};
 
-	fp = fopen("/proc/cmdline", "r");
-	if (!fp) {
-		fprintf(stderr, "Failed to open /proc/cmdline\n");
-		return RETURN_ERR;
-	}
+        fp = fopen("/proc/cmdline", "r");
+        if (!fp) {
+                fprintf(stderr, "Failed to open /proc/cmdline\n");
+                return RETURN_ERR;
+        }
 
-	if (!fgets(cmd, CMD_BUF, fp)) {
-		fclose(fp);
-		fprintf(stderr, "Failed to read /proc/cmdline\n");
-		return RETURN_ERR;
-	}
-	fclose(fp);
+        if (!fgets(cmd, CMD_BUF, fp)) {
+                fclose(fp);
+                fprintf(stderr, "Failed to read /proc/cmdline\n");
+                return RETURN_ERR;
+        }
+        fclose(fp);
 
-	char *start = strstr(cmd, "root=");
-	if (!start) {
-		fprintf(stderr, "Root partition not found in /proc/cmdline\n");
-		return RETURN_ERR;
-	}
+        char *start = strstr(cmd, "root=");
+        if (!start) {
+                fprintf(stderr, "Root partition not found in /proc/cmdline\n");
+                return RETURN_ERR;
+        }
 
-	start += strlen("root=");	/* Move pointer to start of device path */
-	char *end = strchr(start, ' ');	/* Find space after device path */
-	if (!end)
-		end = start + strlen(start);	/* No space, go till end of line */
+        start += strlen("root=");       /* Move pointer to start of device path */
+        char *end = strchr(start, ' '); /* Find space after device path */
+        if (!end)
+                end = start + strlen(start);    /* No space, go till end of line */
 
-	size_t len = end - start;
-	if (len >= PATH_LEN)
-		len = PATH_LEN - 1;
+        size_t len = end - start;
+        if (len >= PATH_LEN)
+                len = PATH_LEN - 1;
 
-	snprintf(g_root_partition, sizeof(g_root_partition), "%.*s", (int)len, start);
-	g_root_partition[strcspn(g_root_partition, "\r\n ")] = '\0';
+        snprintf(g_root_partition, sizeof(g_root_partition), "%.*s", (int)len, start);
+        g_root_partition[strcspn(g_root_partition, "\r\n ")] = '\0';
 
-	fprintf(stderr, "Active root partition: %s\n", g_root_partition);
-	return RETURN_OK;
+        fprintf(stderr, "Active root partition: %s\n", g_root_partition);
+        return RETURN_OK;
 }
 int check_image_version(const char *g_firmwareVersion,
-			 const char *g_firmwareLocation,
-			 const char *g_root_partition)
+                         const char *g_firmwareLocation,
+                         const char *g_root_partition)
 {
-	char cmd[CMD_BUF], output[512];
-	char currentVersion[256]   = {0};
-	char line[512];
-	int ret;
-	char passiveFile[512];
+        char cmd[CMD_BUF], output[512];
+        char currentVersion[256]   = {0};
+        char line[512];
+        int ret;
+        char passiveFile[512];
 
-	/* ---------- Step 1: Download file via TFTP ---------- */
-	if ( protocol == 2 ) {
-	       	snprintf(cmd, sizeof(cmd),
-		 "cd /tmp && tftp -g -r %s %s 2>/dev/null",
-		 g_firmwareVersion, g_firmwareLocation);
-	}
-	else if (protocol == 1) {
-		fprintf(stderr, "downloading image using curl -fgLo /tmp/%s  http://%s/%s",
+        /* ---------- Step 1: Download file via TFTP ---------- */
+        if ( protocol == 2 ) {
+                snprintf(cmd, sizeof(cmd),
+                 "cd /tmp && tftp -g -r %s %s 2>/dev/null",
+                 g_firmwareVersion, g_firmwareLocation);
+        }
+        else if (protocol == 1) {
+                fprintf(stderr, "downloading image using curl -fgLo /tmp/%s  http://%s/%s",
                  g_firmwareVersion, g_firmwareLocation,g_firmwareVersion);
-		snprintf(cmd, sizeof(cmd),
+                snprintf(cmd, sizeof(cmd),
                  "curl -fgLo /tmp/%s  http://%s/%s",
-		 g_firmwareVersion, g_firmwareLocation,g_firmwareVersion);
-	}
-	ret = run_command(cmd, output, sizeof(output));
-	if (ret != 0) {
-		fprintf(stderr, "Download image from server failed: %s\n", output);
-		return RETURN_ERR;
-	}
+                 g_firmwareVersion, g_firmwareLocation,g_firmwareVersion);
+        }
+        ret = run_command(cmd, output, sizeof(output));
+        if (ret != 0) {
+                fprintf(stderr, "Download image from server failed: %s\n", output);
+                return RETURN_ERR;
+        }
 
-	/* ---------- Step 2: Open downloaded file ---------- */
-	char filePath[512];
-	snprintf(filePath, sizeof(filePath), "/tmp/%s", g_firmwareVersion);
+        /* ---------- Step 2: Open downloaded file ---------- */
+        char filePath[512];
+        snprintf(filePath, sizeof(filePath), "/tmp/%s", g_firmwareVersion);
 
-	FILE *fp = fopen(filePath, "r");
-	if (!fp) {
-		perror("fopen downloaded file");
-		return;
-	}
+        FILE *fp = fopen(filePath, "r");
+        if (!fp) {
+                perror("fopen downloaded file");
+                return;
+        }
 
-	if (fgets(line, sizeof(line), fp) != NULL) {
-		char *filename = strrchr(line, ' ');
-		if (filename) {
-			filename++;
-			filename[strcspn(filename, "\n")] = 0;
-			/* Remove `.bin.wic.bz2`  */
-			char *dot = strstr(filename, ".bin.wic.bz2");
-			if (dot) *dot = '\0';
+        if (fgets(line, sizeof(line), fp) != NULL) {
+                char *filename = strrchr(line, ' ');
+                if (filename) {
+                        filename++;
+                        filename[strcspn(filename, "\n")] = 0;
+                        /* Remove `.bin.wic.bz2`  */
+                        char *dot = strstr(filename, ".bin.wic.bz2");
+                        if (dot) *dot = '\0';
 
-			strncpy(extractedVersion, filename, sizeof(extractedVersion) - 1);
-			fprintf(stderr, "Xconf-server Version: %s\n", extractedVersion);
-		} else {
-			fprintf(stderr, "Failed to parse filename from downloaded file\n");
-		}
-	} else {
-		fprintf(stderr, "Downloaded file is empty\n");
-	}
+                        strncpy(extractedVersion, filename, sizeof(extractedVersion) - 1);
+                        fprintf(stderr, "Xconf-server Version: %s\n", extractedVersion);
+                } else {
+                        fprintf(stderr, "Failed to parse filename from downloaded file\n");
+                }
+        } else {
+                fprintf(stderr, "Downloaded file is empty\n");
+        }
 
-	fclose(fp);
+        fclose(fp);
 
-	/* ---------- Step 3: Active Partition Version ---------- */
-	if (get_image_version("/version.txt", currentVersion, sizeof(currentVersion)) == 0) {
-		fprintf(stderr, "Current Partition Version: %s\n", currentVersion);
+        /* ---------- Step 3: Active Partition Version ---------- */
+        if (get_image_version("/version.txt", currentVersion, sizeof(currentVersion)) == 0) {
+                fprintf(stderr, "Current Partition Version: %s\n", currentVersion);
 
-		if (strcmp(currentVersion, extractedVersion) == 0) {
-			fprintf(stderr,"Current  Partition version matched with xconf,  No need of Download and bank switch (%s)\n", extractedVersion);
-		        return RETURN_ERR;
-		}
-	} else {
-		fprintf(stderr,"Failed to read version from active partition\n");
-	}
+                if (strcmp(currentVersion, extractedVersion) == 0) {
+                        fprintf(stderr,"Current  Partition version matched with xconf,  No need of Download and bank switch (%s)\n", extractedVersion);
+                        return RETURN_ERR;
+                }
+        } else {
+                fprintf(stderr,"Failed to read version from active partition\n");
+        }
 
-	/* ---------- Step 4: Passive Partition Version ---------- */
-	const char *passive_partition =
-		(strcmp(g_root_partition, "/dev/mmcblk0p4") == 0) ? "/dev/mmcblk0p8" : "/dev/mmcblk0p4";
+        /* ---------- Step 4: Passive Partition Version ---------- */
+        const char *passive_partition =
+                (strcmp(g_root_partition, "/dev/mmcblk0p4") == 0) ? "/dev/mmcblk0p8" : "/dev/mmcblk0p4";
 
-	fprintf(stderr,"Passive Partition device: %s\n", passive_partition);
+        fprintf(stderr,"Passive Partition device: %s\n", passive_partition);
 
-	if (access(MOUNT_POINT_2, F_OK) != 0) {
-		if (mkdir(MOUNT_POINT_2, 0755) != 0) {
-			perror("mkdir failed");
-			return -1; 
-		}
-	}
+        if (access(MOUNT_POINT_2, F_OK) != 0) {
+                if (mkdir(MOUNT_POINT_2, 0755) != 0) {
+                        perror("mkdir failed");
+                        return -1;
+                }
+        }
 
-	snprintf(cmd, sizeof(cmd),
-		 "mount -t ext4 -o relatime,sync %s %s 2>&1",
-		 passive_partition, MOUNT_POINT_2);
-	memset(output, 0, sizeof(output));
-	ret = run_command(cmd, output, sizeof(output));
-	if (ret == 0) {
+        snprintf(cmd, sizeof(cmd),
+                 "mount -t ext4 -o relatime,sync %s %s 2>&1",
+                 passive_partition, MOUNT_POINT_2);
+        memset(output, 0, sizeof(output));
+        ret = run_command(cmd, output, sizeof(output));
+        if (ret == 0) {
                 char version_file[512];
                 snprintf(version_file, sizeof(version_file),
                          "%s/version.txt", MOUNT_POINT_2);
@@ -1063,10 +1070,10 @@ int check_image_version(const char *g_firmwareVersion,
                 return -1;
         }
 
-	snprintf(passiveFile, sizeof(passiveFile), "%s/version.txt", MOUNT_POINT_2);
+        snprintf(passiveFile, sizeof(passiveFile), "%s/version.txt", MOUNT_POINT_2);
 
-	ret = get_image_version(passiveFile, passiveVersion, sizeof(passiveVersion));
-	if (ret == 0) {
+        ret = get_image_version(passiveFile, passiveVersion, sizeof(passiveVersion));
+        if (ret == 0) {
                 fprintf(stderr,"Passive Partition Version: %s\n", passiveVersion);
 
                 if (strcmp(passiveVersion, extractedVersion) == 0) {
@@ -1104,27 +1111,27 @@ int cleanup_mount(const char *mnt)
 
 int get_image_version(const char *filePath, char *outVersion, size_t outSize)
 {
-	FILE *fp = fopen(filePath, "r");
-	char line[512];
+        FILE *fp = fopen(filePath, "r");
+        char line[512];
 
-	if (!fp) {
-		return -1;	
-	}
+        if (!fp) {
+                return -1;
+        }
 
-	while (fgets(line, sizeof(line), fp) != NULL) {
-		if (strncmp(line, "imagename:", 10) == 0) {
-			char *val = line + 10;	/* skip "imagename:" */
-			val[strcspn(val, "\n")] = 0;
-			strncpy(outVersion, val, outSize - 1);
-			outVersion[outSize - 1] = '\0';
+        while (fgets(line, sizeof(line), fp) != NULL) {
+                if (strncmp(line, "imagename:", 10) == 0) {
+                        char *val = line + 10;  /* skip "imagename:" */
+                        val[strcspn(val, "\n")] = 0;
+                        strncpy(outVersion, val, outSize - 1);
+                        outVersion[outSize - 1] = '\0';
 
-			fclose(fp);
-			return 0;
-		}
-	}
+                        fclose(fp);
+                        return 0;
+                }
+        }
 
-	fclose(fp);
-	return -2;
+        fclose(fp);
+        return -2;
 }
 
 /* fwupgrade_hal_update_and_factoryreset */
@@ -1143,14 +1150,14 @@ INT fwupgrade_hal_update_and_factoryreset()
     if(RETURN_OK != fwupgrade_hal_download())
     {
         fprintf(stderr,"failed download the image to CPE_hal download faild\n");
-	return RETURN_ERR;
+        return RETURN_ERR;
     }
 
     // Will do signature checks , switch banks and reboot
     if(RETURN_OK != fwupgrade_hal_download_reboot_now())
     {
         fprintf(stderr,"failed download_Reboot the CPE_reboot_now is d=failed\n");
-       	return RETURN_ERR;
+        return RETURN_ERR;
     }
 
     return RETURN_OK;
@@ -1225,14 +1232,14 @@ void write_image_to_device(const char *src_img, const char *dst_dev, int block_s
 
 INT fwupgrade_hal_recover_image(){
 
-	int bs_512 = 512;
-	fprintf(stderr, "recovering base image has started");
+        int bs_512 = 512;
+        fprintf(stderr, "recovering base image has started");
 
         copy_blocks("/dev/mmcblk0p1", "/tmp/bl2.img", 0, 8158, bs_512);
         copy_blocks("/dev/mmcblk0p5", "/tmp/bl2_b.img", 0, 8158, bs_512);
         copy_blocks("/dev/mmcblk0p2", "/tmp/fip.img", 0, 4096, bs_512);
         copy_blocks("/dev/mmcblk0p6", "/tmp/fip_b.img", 0, 4096, bs_512);
-	sync();
+        sync();
 
         fprintf(stderr, "bl2 and fip 2 are ready to swapping\n");
 
@@ -1250,22 +1257,21 @@ INT fwupgrade_hal_recover_image(){
 }
 
 void set_xconf_flag() {
-	g_xconf_upgrade_flag = 1;
-	FILE *fp = fopen("/tmp/xconf_flag", "w");
-	if (fp) {
-	    fprintf(stderr, "Opened /tmp/xconf_flag for writing\n");  // Debug log
-	    if (fprintf(fp, "%d\n", g_xconf_upgrade_flag) < 0) {
-		perror("fprintf");
-	    }
-	    if (fclose(fp) == EOF) {
-		perror("fclose");
-	    } else {
-		fprintf(stderr, "Successfully wrote to /tmp/xconf_flag\n");
-	    }
-	} else {
-	    perror("fopen /tmp/xconf_flag");
-	}
-	
+        g_xconf_upgrade_flag = 1;
+        FILE *fp = fopen("/tmp/xconf_flag", "w");
+        if (fp) {
+            fprintf(stderr, "Opened /tmp/xconf_flag for writing\n");  // Debug log
+            if (fprintf(fp, "%d\n", g_xconf_upgrade_flag) < 0) {
+                perror("fprintf");
+            }
+            if (fclose(fp) == EOF) {
+                perror("fclose");
+            } else {
+                fprintf(stderr, "Successfully wrote to /tmp/xconf_flag\n");
+            }
+        } else {
+            perror("fopen /tmp/xconf_flag");
+        }
 }
 
 int main(int argc, char **argv) {
