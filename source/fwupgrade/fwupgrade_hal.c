@@ -107,8 +107,12 @@ int run_command(const char *cmd, char *output, unsigned int size) {
 
         while (fgets(buf, sizeof(buf), fp)) {
                 fprintf(stderr, "[CMD OUTPUT] %s", buf);
-                n+=strncpy(output+n, buf, strlen(buf));
+                if (output && size > 0) {
+                       strncpy(output + n, buf, strlen(buf));
+                       n += strlen(buf);
+                }
         }
+
 
         if((status = pclose(fp))==-1) {
                 perror("pclose failed");
@@ -160,7 +164,7 @@ static INT download_image_from_server(char *httpUrl, char* fileName)
 {
 	// TBD should have been dynamically allocated
 	//
-        char cmd[1400] = {0};
+	 char cmd[1400] = {0};
         char res[16] = {0};
         FILE* fp = NULL;
         INT ret = 0;
@@ -180,10 +184,14 @@ static INT download_image_from_server(char *httpUrl, char* fileName)
                 	return -1;
         	}
 	
-        snprintf(cmd, sizeof(cmd), "sgdisk -c 14:\"staging\" /dev/mmcblk0");
-        run_command(cmd, NULL, 0);
-        snprintf(cmd, sizeof(cmd), "mkfs.ext4 -F -L staging %s", partition_path);
-        run_command(cmd, NULL, 0);
+	snprintf(cmd, sizeof(cmd), "sgdisk -c 14:\"staging\" /dev/mmcblk0");
+	run_command(cmd, NULL, 0);
+	snprintf(cmd, sizeof(cmd), "mkfs.ext4 -F -L staging %s", partition_path);
+        ret = run_command(cmd, NULL, 0);
+        if (ret != 0) {
+                fprintf(stderr, "mkfs failed for %s\n", partition_path);
+                return RETURN_ERR;
+	}
 	}
         // Step 6: Mount it to /mnt/bootpart
 	if (access(MOUNT_POINT_1, F_OK) != 0) {
@@ -318,7 +326,7 @@ INT fwupgrade_hal_set_download_url (char* pUrl, char* pfilename)
 			else
 			{
 				fprintf(stderr,"HTTP URL or filename Changed! \n");
-				run_commnd("rm /mnt/bootpart/dload_status", NULL, 0);
+				run_command("rm /mnt/bootpart/dload_status", NULL, 0);
 			}
 		}
 		else
@@ -669,8 +677,8 @@ INT fwupgrade_hal_download_reboot_now()
 
         // Step 3: Determine target partitions
 
-	if (strcmp(g_root_partition, "/dev/mmcblk0p4") == 0) {
-		fprintf(stderr, "Currently booted from ROOT-A, switching to ROOT-B\n");
+        if (strcmp(g_root_partition, "/dev/mmcblk0p4") == 0) {
+	        fprintf(stderr, "Currently booted from ROOT-A, switching to ROOT-B\n");
                 strcpy(target_boot, "/dev/mmcblk0p7");
                 strcpy(target_root, "/dev/mmcblk0p8");
                 update_fstab = 1;
