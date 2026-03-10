@@ -325,7 +325,7 @@ INT fwupgrade_hal_set_download_url (char* pUrl, char* pfilename)
                         else
                         {
                                 fprintf(stderr,"HTTP URL or filename Changed! \n");
-                                run_commnd("rm /mnt/bootpart/dload_status", NULL, 0);
+                                run_command("rm /mnt/bootpart/dload_status", NULL, 0);
                         }
                 }
                 else
