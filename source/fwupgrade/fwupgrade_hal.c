@@ -94,6 +94,34 @@ char g_firmwareLocation[512];
 char g_firmwareVersion[128];
 char g_firmwareProtocol[64];
 
+int run_command(const char *cmd, char *output, unsigned int size) {
+        char buf[256];
+        FILE *fp = popen(cmd, "r");
+        int status, n=0;
+
+        if (!fp) {
+                perror("popen");
+                fprintf(stderr, "'%s' command failed\n", cmd);
+                return -1;
+        }
+
+        while (fgets(buf, sizeof(buf), fp)) {
+                fprintf(stderr, "[CMD OUTPUT] %s", buf);
+                if (output && size > 0) {
+                       strncpy(output + n, buf, strlen(buf));
+                       n += strlen(buf);
+                }
+        }
+
+
+        if((status = pclose(fp))==-1) {
+                perror("pclose failed");
+                return -1;
+        }
+
+        return WEXITSTATUS(status);
+}
+
 //static INT fwupgrade_hal_util_get_syscmd_output( char *pCmd, char *pOutput, int iOutputSize );
 
 /* * fwupgrade_hal_util_get_syscmd_output() */
@@ -136,10 +164,11 @@ static INT download_image_from_server(char *httpUrl, char* fileName)
 {
 	// TBD should have been dynamically allocated
 	//
-	 char cmd[1400] = {0};
+        char cmd[1400] = {0};
         char res[16] = {0};
         FILE* fp = NULL;
         INT ret = 0;
+        char output[512] = {0};
         static int partition_created = 0;
 
 	const char *partition_path = STAGING_PARTITION;
@@ -149,16 +178,20 @@ static INT download_image_from_server(char *httpUrl, char* fileName)
         if (access(partition_path, F_OK) == 0) {
                 fprintf(stderr,"Partition %s already exists. Skipping creation.\n", partition_path);
         } else {
-		ret = system("echo -e \"n\n\n\n+3G\nw\" | fdisk /dev/mmcblk0");
+		ret = run_command("echo -e \"n\n\n\n+3G\nw\" | fdisk /dev/mmcblk0", NULL, 0);
         	if (ret != 0) {
                 	fprintf(stderr, "Failed to create new partition\n");
                 	return -1;
         	}
 	
 	snprintf(cmd, sizeof(cmd), "sgdisk -c 14:\"staging\" /dev/mmcblk0");
-	system(cmd);
-	 snprintf(cmd, sizeof(cmd), "mkfs.ext4 -F -L staging %s", partition_path);
-        system(cmd);
+	run_command(cmd, NULL, 0);
+	snprintf(cmd, sizeof(cmd), "mkfs.ext4 -F -L staging %s", partition_path);
+        ret = run_command(cmd, NULL, 0);
+        if (ret != 0) {
+                fprintf(stderr, "mkfs failed for %s\n", partition_path);
+                return RETURN_ERR;
+	}
 	}
         // Step 6: Mount it to /mnt/bootpart
 	if (access(MOUNT_POINT_1, F_OK) != 0) {
@@ -168,7 +201,13 @@ static INT download_image_from_server(char *httpUrl, char* fileName)
                }
         }
         snprintf(cmd, sizeof(cmd), "mount %s /mnt/bootpart", partition_path);
-        system(cmd);
+        memset(output, 0, sizeof(output));
+        ret = run_command(cmd, output, sizeof(output));
+
+	if (ret != 0) {
+        fprintf(stderr, "Mount failed: %s\n", output);
+        return -1;
+	}
 	strncpy(g_downloaded_file_name, fileName, sizeof(g_downloaded_file_name) - 1);
         g_downloaded_file_name[sizeof(g_downloaded_file_name) - 1] = '\0';
 
@@ -194,7 +233,7 @@ static INT download_image_from_server(char *httpUrl, char* fileName)
 		fprintf(stderr, "%s: Unknown protocol in URL: %s\n", __func__, httpUrl);
     		return RETURN_ERR;
 	}
-	system(cmd);
+        run_command(cmd, NULL, 0);
 
 	fprintf(stderr," the value of flag in /tmp is ",g_xconf_flag);
 	g_xconf_flag = get_xconf_flag();
@@ -206,16 +245,18 @@ static INT download_image_from_server(char *httpUrl, char* fileName)
                 "cd /mnt/bootpart &&"
 		"md5sum %s > %s",
                 fileName, md5_file);
-        int res= system(cmd);
-	if (res !=0){
-		fprintf(stderr,"md5sum failed for downloaded image");
-	}
+        memset(output, 0, sizeof(output));
+        ret= run_command(cmd, output, sizeof(output));
+        if (ret !=0){
+	        fprintf(stderr,"md5sum failed for downloaded image");
+        }
 
         snprintf(cmd, sizeof(cmd),
 		"(diff -q %s /tmp/%s.txt > /dev/null; ret=$?; echo $ret > /mnt/bootpart/dload_status; exit $ret)", md5_file, fileName);
-        int diff_ret = system(cmd);
+        memset(output, 0, sizeof(output));
+        ret = run_command(cmd, output, sizeof(output));
 
-        if (diff_ret != 0) {
+        if (ret != 0) {
                 fprintf(stderr, "MD5 mismatch! See %s vs /tmp/%s\n", md5_file, g_firmwareVersion);
                 return -1; 
         }
@@ -227,7 +268,7 @@ static INT download_image_from_server(char *httpUrl, char* fileName)
                 printf("dload_status : file open error!");
                 return RETURN_ERR;
         }
-         fgets(res, sizeof(res) - 1, fp);
+        fgets(res, sizeof(res) - 1, fp);
         fclose(fp);
         ret = atoi(res);
         if (0 != ret) {
@@ -286,12 +327,12 @@ INT fwupgrade_hal_set_download_url (char* pUrl, char* pfilename)
 			else
 			{
 				fprintf(stderr,"HTTP URL or filename Changed! \n");
-				system("rm /mnt/bootpart/dload_status");
+				run_command("rm /mnt/bootpart/dload_status", NULL, 0);
 			}
 		}
 		else
 		{
-			system("rm /mnt/bootpart/dload_status");
+			run_command("rm /mnt/bootpart/dload_status", NULL, 0);
 		}
 		fp = fopen(HTTP_DWNLD_CONFIG_FILE, "w");
 		if(fp == NULL)
@@ -598,9 +639,15 @@ INT fwupgrade_hal_download_reboot_now()
         char target_boot[PATH_LEN], target_root[PATH_LEN];
         int update_fstab = 0;
         int bs_512 = 512;
-        int bs_1M = 1024 * 1024;
         char decompress_cmd[300];
-        fprintf(stderr, "Entering %s\n", __func__);
+        char cmd[256];
+        char output[512];
+        int attempt = 0;
+        char fstab_path[512];
+        int ret;
+        const char *OLD_STR = "/dev/mmcblk0p3";
+        FILE *fp_in, *fp_out;
+        char line[MAX_LINE], *pos;
         snprintf(wic_path, sizeof(wic_path), "/mnt/bootpart/%s", g_downloaded_file_name);
         // Step 1: Check if file exists
         if (access(wic_path, F_OK) != 0) {
@@ -611,9 +658,10 @@ INT fwupgrade_hal_download_reboot_now()
 
         // Step 2: Decompress
         snprintf(decompress_cmd, sizeof(decompress_cmd), "bzip2 -d %s", wic_path);
-        int ret = system(decompress_cmd);
+        ret = run_command(decompress_cmd, output, sizeof(output));
         if (ret != 0) {
                 fprintf(stderr,"Decompression failed for: %s\n", wic_path);
+		cleanup_mount(MOUNT_POINT_1);
                 return RETURN_ERR;
         }
 	// Step 3: Get decompressed path
@@ -625,14 +673,15 @@ INT fwupgrade_hal_download_reboot_now()
         fprintf(stderr,"Decompressed image at: %s\n", decompressed_path);
 	if (detect_root_partition() != RETURN_OK) {
         fprintf(stderr, "Could not detect root partition!\n");
-        return;
+	cleanup_mount(MOUNT_POINT_1);
+        return RETURN_ERR;
         }
 
 
         // Step 3: Determine target partitions
 
-        if (strcmp(g_root_partition, "/dev/mmcblk0p4") == 0) {
-                fprintf(stderr, "Currently booted from ROOT-A, switching to ROOT-B\n");
+	if (strcmp(g_root_partition, "/dev/mmcblk0p4") == 0) {
+		fprintf(stderr, "Currently booted from ROOT-A, switching to ROOT-B\n");
                 strcpy(target_boot, "/dev/mmcblk0p7");
                 strcpy(target_root, "/dev/mmcblk0p8");
                 update_fstab = 1;
@@ -644,6 +693,7 @@ INT fwupgrade_hal_download_reboot_now()
         } else {
                 fprintf(stderr, "Unsupported root partition_1: %s\n", g_root_partition);
                 return RETURN_ERR;
+                cleanup_mount(MOUNT_POINT_1);
         }
 
 	copy_blocks(decompressed_path, target_boot, 17408, 32768, bs_512);
@@ -655,24 +705,18 @@ INT fwupgrade_hal_download_reboot_now()
 		if (access(MOUNT_POINT, F_OK) != 0) {
     			if (mkdir(MOUNT_POINT, 0755) != 0) {
         			perror("mkdir failed");
+				cleanup_mount(MOUNT_POINT_1);
         			return EXIT_FAILURE;
     			}
 		}
 
-		char cmd[256];
-		char output[512];
-		FILE *fp;
-		int status, attempt = 0;
-		char fstab_path[512];
-
 		snprintf(fstab_path, sizeof(fstab_path), "%s/etc/fstab", MOUNT_POINT);
 
-		int ret;
         	while (attempt < MAX_RETRIES) {
                 	snprintf(cmd, sizeof(cmd),
                         	"mount -t ext4 -o relatime,sync %s %s 2>&1",
                         	target_root, MOUNT_POINT);
-
+			memset(output, 0, sizeof(output));
                 	ret = run_command(cmd, output, sizeof(output));
 
                 	if (ret == 0) {
@@ -681,21 +725,23 @@ INT fwupgrade_hal_download_reboot_now()
                                         	"Mount successful and fstab found at %s\n",
                                         	fstab_path);
                                 	break;
+				} else {
+					fprintf(stderr,"target fstab not found. Retrying...\n");
+				}
                         } else {
-                                fprintf(stderr,
-                                        "target fstab not found. Retrying...\n");
-                        	}
-                	}	
-                	fprintf(stderr, "Mount failed with exit code %d (attempt %d/%d)\n",
+				fprintf(stderr, "Mount failed with exit code %d (attempt %d/%d)\n",
                         	ret, attempt + 1, MAX_RETRIES);
+			}
 
                 	attempt++;
                 	sleep(RETRY_DELAY);
         	}
+		if (attempt == MAX_RETRIES) {
+			fprintf(stderr, "Mount failed after %d attempts\n", MAX_RETRIES);
+			cleanup_mount(MOUNT_POINT_1);
+			return RETURN_ERR;
+		}
 
-        	const char *OLD_STR = "/dev/mmcblk0p3";
-        	FILE *fp_in, *fp_out;
-        	char line[MAX_LINE], *pos;
         	fp_in = fopen(fstab_path, "r");
         	if (!fp_in) {
                 	perror("Failed to open fstab for reading");
@@ -725,8 +771,8 @@ INT fwupgrade_hal_download_reboot_now()
         	}
 
         	fprintf(stderr,"fstab updated successfully.\n");
-                	umount("/opt/root_new");
-                	rmdir("/opt/root_new");
+                umount("/opt/root_new");
+                rmdir("/opt/root_new");
         	} else {
                 	fprintf(stderr, "No fstab update required for mmcblk0p4 boot.\n");
         	}
@@ -750,37 +796,18 @@ INT fwupgrade_hal_download_reboot_now()
 	sync();
 	sleep(3);
 	fprintf(stderr,"All done. Rebooting...\n");
-        system("/sbin/reboot");
+        run_command("/sbin/reboot", NULL, 0);
 
     	return RETURN_OK;
 }
-int run_command(const char *cmd, char *output, unsigned int size) {
-        char buf[256];
-        FILE *fp = popen(cmd, "r");
-	int status, n=0;
-
-        if (!fp) {
-                perror("popen");
-                fprintf(stderr, "'%s' command failed\n", cmd);
-                return -1;
-        }
-
-        while (fgets(buf, sizeof(buf), fp)) {
-                fprintf(stderr, "[CMD OUTPUT] %s", buf);
-		n+=strncpy(output+n, buf, strlen(buf));
-        }
-
-        if((status = pclose(fp))==-1) {
-                perror("pclose failed");
-                return -1;
-        }
-
-        return WEXITSTATUS(status);
-}
-
 
 INT fwupgrade_hal_get_data_from_Xconf() {
     char mac[32] = {0};
+    char output[512];
+    char cloud_url[512];
+    char full_url[512];
+    char cmd[512];
+    int ret;
     FILE *fp = popen(MAC_CMD, "r");
     if (!fp) {
         fprintf(stderr, "Failed to execute MAC command\n");
@@ -795,22 +822,18 @@ INT fwupgrade_hal_get_data_from_Xconf() {
     pclose(fp);
     mac[strcspn(mac, "\n")] = 0;  // Remove trailing newline
 
-    char cloud_url[512];
     if (get_cloud_url(cloud_url, sizeof(cloud_url)) != 0) {
         return -1;    // Failed to read CLOUDURL
-   }
-   char full_url[512];
-   snprintf(full_url, sizeof(full_url), "%s%s", cloud_url, mac);
-
-   char cmd[512];
-   snprintf(cmd, sizeof(cmd),
-          "curl -s %s -o %s",
+    }
+    snprintf(full_url, sizeof(full_url), "%s%s", cloud_url, mac);
+    snprintf(cmd, sizeof(cmd),
+           "curl -s %s -o %s",
            full_url, TMP_JSON_FILE);
-       if (system(cmd) != 0) {
-          fprintf(stderr, "Curl command failed\n");
-          return -1;
-     }
-
+    ret = run_command(cmd, output, sizeof(output));
+    if (ret != 0) {
+        fprintf(stderr, "Curl command failed: %s\n", output);
+	return -1;
+    }
 
     // Step 3: Parse response JSON
     fp = fopen(TMP_JSON_FILE, "r");
@@ -958,6 +981,7 @@ int check_image_version(const char *g_firmwareVersion,
 	char currentVersion[256]   = {0};
 	char line[512];
 	int ret;
+	char passiveFile[512];
 
 	/* ---------- Step 1: Download file via TFTP ---------- */
 	if ( protocol == 2 ) {
@@ -972,8 +996,9 @@ int check_image_version(const char *g_firmwareVersion,
                  "curl -fgLo /tmp/%s  http://%s/%s",
 		 g_firmwareVersion, g_firmwareLocation,g_firmwareVersion);
 	}
-	if (system(cmd) != 0) {
-		fprintf(stderr, " Download image version from server failed" );
+	ret = run_command(cmd, output, sizeof(output));
+	if (ret != 0) {
+		fprintf(stderr, "Download image from server failed: %s\n", output);
 		return RETURN_ERR;
 	}
 
@@ -1035,9 +1060,9 @@ int check_image_version(const char *g_firmwareVersion,
 	snprintf(cmd, sizeof(cmd),
 		 "mount -t ext4 -o relatime,sync %s %s 2>&1",
 		 passive_partition, MOUNT_POINT_2);
-
+	memset(output, 0, sizeof(output));
 	ret = run_command(cmd, output, sizeof(output));
-        if (ret == 0) {
+	if (ret == 0) {
                 char version_file[512];
                 snprintf(version_file, sizeof(version_file),
                          "%s/version.txt", MOUNT_POINT_2);
@@ -1056,11 +1081,10 @@ int check_image_version(const char *g_firmwareVersion,
                 return -1;
         }
 
-	char passiveFile[512];
 	snprintf(passiveFile, sizeof(passiveFile), "%s/version.txt", MOUNT_POINT_2);
 
-	int ret_1 = get_image_version(passiveFile, passiveVersion, sizeof(passiveVersion));
-        if (ret_1 == 0) {
+	ret = get_image_version(passiveFile, passiveVersion, sizeof(passiveVersion));
+	if (ret == 0) {
                 fprintf(stderr,"Passive Partition Version: %s\n", passiveVersion);
 
                 if (strcmp(passiveVersion, extractedVersion) == 0) {
@@ -1085,10 +1109,11 @@ int check_image_version(const char *g_firmwareVersion,
 int cleanup_mount(const char *mnt)
 {
     char cmd[256];
-
+    char output[512];
+    int ret;
     snprintf(cmd, sizeof(cmd), "rm -rf %s/*", mnt);
-
-    if (system(cmd) != 0) {
+    ret = run_command(cmd, output, sizeof(output));
+    if (ret != 0) {
         fprintf(stderr, "Failed to cleanup %s\n", mnt);
         return -1;
     }
@@ -1235,7 +1260,7 @@ INT fwupgrade_hal_recover_image(){
         write_image_to_device("/tmp/fip.img", "/dev/mmcblk0p6", bs_512);
         sync();
         fprintf(stderr,"All done. Rebooting...\n");
-        system("/sbin/reboot");
+        run_command("/sbin/reboot", NULL, 0);
 
         return RETURN_OK;
 
@@ -1284,21 +1309,21 @@ int main(int argc, char **argv) {
         snprintf(cmd, sizeof(cmd),
             "dmcli eRT setv Device.DeviceInfo.X_RDKCENTRAL-COM_FirmwareDownloadProtocol string %s",
             g_firmwareProtocol);
-        system(cmd);
+        run_command(cmd, NULL, 0);
 
         snprintf(cmd, sizeof(cmd),
             "dmcli eRT setv Device.DeviceInfo.X_RDKCENTRAL-COM_FirmwareDownloadURL string \"%s://%s:%d\"",
             g_firmwareProtocol, g_firmwareLocation, port_num);
-        system(cmd);
+        run_command(cmd, NULL, 0);
 
         snprintf(cmd, sizeof(cmd),
             "dmcli eRT setv Device.DeviceInfo.X_RDKCENTRAL-COM_FirmwareToDownload string %s",
             g_firmwareFilename);
-        system(cmd);
+        run_command(cmd, NULL, 0);
 
         snprintf(cmd, sizeof(cmd),
             "dmcli eRT setv Device.DeviceInfo.X_RDKCENTRAL-COM_FirmwareDownloadAndFactoryReset int 1");
-        system(cmd);
+        run_command(cmd, NULL, 0);
 
         printf("[INFO] Firmware upgrade is in progress.....\n");
     }
