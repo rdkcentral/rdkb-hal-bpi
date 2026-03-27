@@ -1324,8 +1324,8 @@ int main(int argc, char **argv) {
         run_command(cmd, NULL, 0);
 
         snprintf(cmd, sizeof(cmd),
-            "dmcli eRT setv Device.DeviceInfo.X_RDKCENTRAL-COM_FirmwareDownloadURL string \"%s://%s:%d\"",
-            g_firmwareProtocol, g_firmwareLocation, port_num);
+            "dmcli eRT setv Device.DeviceInfo.X_RDKCENTRAL-COM_FirmwareDownloadURL string \"%s://%s\"",
+            g_firmwareProtocol, g_firmwareLocation);
         run_command(cmd, NULL, 0);
 
         snprintf(cmd, sizeof(cmd),
