@@ -835,14 +835,13 @@ INT fwupgrade_hal_get_data_from_Xconf() {
             fclose(fp);
        }
 	
-    chat MAC_CMD[128]={0};
+    char MAC_CMD[128]={0};
 	snprintf(MAC_CMD, sizeof(path), "/sbin/ifconfig %s | grep HWaddr | cut -c39-55", g_virtualIfName);
-    FILE *fp = popen(MAC_CMD, "r");
+    fp = popen(MAC_CMD, "r");
     if (!fp) {
         fprintf(stderr, "Failed to execute MAC command\n");
         return -1;
     }
-
     if (!fgets(mac, sizeof(mac), fp)) {
         pclose(fp);
         fprintf(stderr, "Failed to read MAC address\n");
