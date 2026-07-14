@@ -835,8 +835,8 @@ INT fwupgrade_hal_get_data_from_Xconf() {
             fclose(fp);
        }
 	
-    char MAC_CMD[128]={0};
-	snprintf(MAC_CMD, sizeof(path), "/sbin/ifconfig %s | grep HWaddr | cut -c39-55", g_virtualIfName);
+char MAC_CMD[128]={0};
+	snprintf(MAC_CMD, sizeof(MAC_CMD), "/sbin/ifconfig %s | grep HWaddr | cut -c39-55", g_virtualIfName);
     fp = popen(MAC_CMD, "r");
     if (!fp) {
         fprintf(stderr, "Failed to execute MAC command\n");
