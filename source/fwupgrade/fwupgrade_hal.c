@@ -86,7 +86,6 @@ typedef enum {
 } protocol_t;
 protocol_t g_protocol = PROTOCOL_UNKNOWN;
 #define TMP_JSON_FILE "/tmp/xconf_response.json"
-#define MAC_CMD "/sbin/ifconfig erouter0 | grep HWaddr | cut -c39-55"
 #define FILENAME_MAX_LENGTH 128
 #define URL_MAX_LENGTH 128
 char g_firmwareFilename[256];
@@ -820,6 +819,25 @@ INT fwupgrade_hal_get_data_from_Xconf() {
     char full_url[512];
     char cmd[512];
     int ret;
+	char path[128];
+	char g_virtualIfName[32] = "erouter0";
+    FILE *fp = fopen("/nvram/wan_name.txt", "r");
+    
+
+       if (fp)
+       {
+        if (fgets(g_virtualIfName, sizeof(g_virtualIfName), fp))
+        {
+           g_virtualIfName[strcspn(g_virtualIfName, "\n")] = '\0';
+
+          if (g_virtualIfName[0] == '\0')
+               strcpy(g_virtualIfName, "erouter0");
+        }
+            fclose(fp);
+       }
+	
+    chat MAC_CMD[128]={0};
+	snprintf(MAC_CMD, sizeof(path), "/sbin/ifconfig %s | grep HWaddr | cut -c39-55", g_virtualIfName);
     FILE *fp = popen(MAC_CMD, "r");
     if (!fp) {
         fprintf(stderr, "Failed to execute MAC command\n");
