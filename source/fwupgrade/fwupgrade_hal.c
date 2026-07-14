@@ -819,7 +819,6 @@ INT fwupgrade_hal_get_data_from_Xconf() {
     char full_url[512];
     char cmd[512];
     int ret;
-	char path[128];
 	char g_virtualIfName[32] = "erouter0";
     FILE *fp = fopen("/nvram/wan_name.txt", "r");
     
