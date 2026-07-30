@@ -823,19 +823,29 @@ INT fwupgrade_hal_get_data_from_Xconf() {
     FILE *fp = fopen("/nvram/wan_name.txt", "r");
     
 
-       if (fp)
-       {
+    if (fp)
+    {
         if (fgets(g_virtualIfName, sizeof(g_virtualIfName), fp))
         {
-           g_virtualIfName[strcspn(g_virtualIfName, "\n")] = '\0';
+            g_virtualIfName[strcspn(g_virtualIfName, "\n")] = '\0';
 
-          if (g_virtualIfName[0] == '\0')
+            if (g_virtualIfName[0] == '\0')
                strcpy(g_virtualIfName, "erouter0");
         }
-            fclose(fp);
-       }
+        fclose(fp);
+    }
+	else if ((fp = popen("sysevent get current_wan_ifname", "r")) != NULL)
+	{
+	    if (fgets(g_virtualIfName, sizeof(g_virtualIfName), fp))
+        {
+           g_virtualIfName[strcspn(g_virtualIfName, "\n")] = '\0';
+           if (g_virtualIfName[0] == '\0')
+               strcpy(g_virtualIfName, "erouter0");
+        }
+        pclose(fp);	   
+	}   
 	
-char MAC_CMD[128]={0};
+    char MAC_CMD[128]={0};
 	snprintf(MAC_CMD, sizeof(MAC_CMD), "/sbin/ifconfig %s | grep HWaddr | cut -c39-55", g_virtualIfName);
     fp = popen(MAC_CMD, "r");
     if (!fp) {
