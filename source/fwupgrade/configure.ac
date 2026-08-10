@@ -32,6 +32,10 @@ AC_DISABLE_STATIC
 AC_CONFIG_HEADERS([config.h])
 AC_CONFIG_MACRO_DIR([m4])
 
+if test "x$EM_EXTENDER" = "xtrue"; then
+    AC_DEFINE([EXTENDER_ENABLED], [1], [Enable EM Extender support])
+fi
+
 # Checks for programs.
 AC_PROG_CC
 AC_PROG_INSTALL
