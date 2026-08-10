@@ -46,6 +46,7 @@
 #include <sys/wait.h>
 #include <errno.h>
 #include "cJSON.h"
+#include "config.h"
 #include <unistd.h>
 #define CMD_BUF 512
 #define PATH_LEN 128
@@ -819,9 +820,12 @@ INT fwupgrade_hal_get_data_from_Xconf() {
     char full_url[512];
     char cmd[512];
     int ret;
-	char g_virtualIfName[32] = "erouter0";
+    FILE *fp = NULL;
+    char g_virtualIfName[32] = "erouter0";
+#ifdef EXTENDER_ENABLED
+    strcpy(g_virtualIfName, "brlan0");
+#else
     FILE *fp = fopen("/nvram/wan_name.txt", "r");
-    
 
     if (fp)
     {
@@ -844,9 +848,9 @@ INT fwupgrade_hal_get_data_from_Xconf() {
         }
         pclose(fp);	   
 	}   
-	
+#endif
     char MAC_CMD[128]={0};
-	snprintf(MAC_CMD, sizeof(MAC_CMD), "/sbin/ifconfig %s | grep HWaddr | cut -c39-55", g_virtualIfName);
+    snprintf(MAC_CMD, sizeof(MAC_CMD), "/sbin/ifconfig %s | grep HWaddr | cut -c39-55", g_virtualIfName);
     fp = popen(MAC_CMD, "r");
     if (!fp) {
         fprintf(stderr, "Failed to execute MAC command\n");
